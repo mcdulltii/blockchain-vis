@@ -20,12 +20,12 @@
     <script>
 		// block class
 		class Block {
-		  constructor(index, timestamp, cont, hash, prevHash) {
+		  constructor(index, timestamp, data, hash, prevHash) {
 			this.x = circles[index].x;
 			this.y = circles[index].y;
 			this.index = index;
 			this.timestamp = timestamp;
-			this.cont = cont;
+			this.data = data;
 			this.hash = hash;
 			this.prevHash = prevHash;
 			this.radius = circles[index].r;
@@ -52,7 +52,7 @@
 			  let showItems = {
 				  "Index:": this.index, 
 				  "Time:": this.timestamp, 
-				  "Data:": this.cont, 
+				  "Data:": this.data,
 				  "Hash:": this.hash, 
 				  "Previous Hash:": this.prevHash
 				  };
@@ -74,6 +74,7 @@
 		  data = {{ .Data }};
 		}
 
+
 		// Convert saved block data into block Objects
 		function loadData() {
 		  let blockData = JSON.parse(data);
@@ -87,10 +88,10 @@
 			// Get index and timestamp and data
 			let index = block['Index'];
 			let timestamp = block['Timestamp'];
-			let cont = block['BPM'];
+			let data = block['Data'];
 
 			// Put object in array
-			blocks.push(new Block(index, timestamp, cont, hash, prevHash));
+			blocks.push(new Block(index, timestamp, data, hash, prevHash));
 		  }
 		}
 
@@ -110,7 +111,7 @@
 				return;
 			}
 			
-			var params = '{"BPM":"'+input.value().stripSlashes()+'"}';
+			var params = '{"Data":"'+input.value().stripSlashes()+'"}';
 			http.open('POST', url, true);
 
 			//Send the proper header information along with the request
@@ -123,7 +124,8 @@
 			}
 			http.send(params);
 			
-			location.reload();
+			// reload page after 10 seconds
+			setTimeout(function(){ location.reload(); }, 5000);
 		}
 
 		// Circle packing algorithm
