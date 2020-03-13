@@ -81,11 +81,13 @@ func run() error {
 var tmpls = template.Must(template.ParseFiles("web/index.html"))
 
 func Index(w http.ResponseWriter, r *http.Request) {
+	bytes, _ := json.MarshalIndent(Blockchain, "", "  ")
 	data := struct {
 		Title  string
-		Header string
+		Data string
 	}{
 		Title:  "Blockchain Visualisation",
+		Data: strings.ReplaceAll(string(bytes), "\n", ""),
 	}
 
 	if err := tmpls.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -97,8 +99,8 @@ func Index(w http.ResponseWriter, r *http.Request) {
 // create handlers
 func makeMuxRouter() http.Handler {
 	muxRouter := mux.NewRouter()
-	muxRouter.HandleFunc("/block.json", handleGetBlockchain).Methods("GET")
-	muxRouter.HandleFunc("/block.json", handleWriteBlock).Methods("POST")
+	// muxRouter.HandleFunc("/", handleGetBlockchain).Methods("GET")
+	muxRouter.HandleFunc("/", handleWriteBlock).Methods("POST")
 	muxRouter.HandleFunc("/web/", Index)
 	muxRouter.PathPrefix("/web/").Handler(http.StripPrefix("/web/", http.FileServer(http.Dir("web/"))))
 	return muxRouter
