@@ -53,6 +53,7 @@ type ProofOfWork struct {
 	target *big.Int
 }
 
+// chatMessage is the struct that is sent to peers
 type chatMessage struct {
 	Request []byte
 }
@@ -121,6 +122,7 @@ func main() {
 /*****************
  * P2P Functions *
  *****************/
+ /* configureNode sets up the node's IP, Port and connecting peer */
 func configureNode() (*noise.Node, error) {
 	// Parse flags/options.
 	pflag.Parse()
@@ -132,7 +134,11 @@ func configureNode() (*noise.Node, error) {
 	)
 }
 
-
+/* startChat is the main running function enabling peer to peer (p2p) functionalities.
+ * 
+ * incoming communications are done by handle
+ * outgoing communications are done by the respective send functions (sendGetChain, sendReceiveChain, sendCheckBlock and chat)
+ */
 func startChat() {
 	// Release resources associated to node at the end of the program.
 	defer node.Close()
@@ -175,22 +181,26 @@ func startChat() {
 	println()
 }
 
+/* Marshal used to convert data within chatMessage to a byte array */
 func (m chatMessage) Marshal() []byte {
 	return m.Request
 }
 
+/* unmarshalChatMessage returns a chatMessage struct with Request byte array */
 func unmarshalChatMessage(buf []byte) (chatMessage, error) {
 	return chatMessage{Request: buf}, nil
 }
 
-// check panics if err is not nil.
+/* check panics if err is not nil. */
 func check(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
 
-// input handles inputs from stdin.
+/* input handles inputs from stdin. 
+ * this function works alongside chat
+ */
 func input(callback func(string)) {
 	r := bufio.NewReader(os.Stdin)
 
@@ -213,6 +223,7 @@ func input(callback func(string)) {
 	}
 }
 
+/* sendGetChain generates a request for peers' blockchain. */
 func SendGetChain(overlay *kademlia.Protocol) {
 	fmt.Println("Sending GetChain to peers.")
 	ids := overlay.Table().Peers()
@@ -242,6 +253,7 @@ func SendGetChain(overlay *kademlia.Protocol) {
 	}
 }
 
+/* sendReceiveChain generates a response to send its blockchain to a peer. */
 func SendReceiveChain(ctx noise.HandlerContext) {
 	fmt.Printf("Sending chain to %s\n", ctx.ID().Address)
 	byteChain := GobEncode(Blockchain)
@@ -262,6 +274,7 @@ func SendReceiveChain(ctx noise.HandlerContext) {
 	}
 }
 
+/* sendCheckBlock generates a request to send a block for validation to all peers. */
 func SendCheckBlock(newBlock Block, overlay *kademlia.Protocol) {
 	fmt.Println("Sending CheckBlock to peers.")
 	ids := overlay.Table().Peers()
@@ -289,6 +302,7 @@ func SendCheckBlock(newBlock Block, overlay *kademlia.Protocol) {
 	}
 }
 
+/* handleStdin handles the request sent from terminal line */
 func handleStdin(request []byte, ctx noise.HandlerContext) error {
 	var buff bytes.Buffer
 	var payload string
