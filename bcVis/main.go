@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/binary"
+	"encoding/gob"
 	"io"
 	"log"
 	"html/template"
@@ -21,7 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
+	"strconv"
 
 	"github.com/perlin-network/noise"
 	"github.com/perlin-network/noise/kademlia"
@@ -43,6 +44,7 @@ type Block struct {
 	Data      string
 	Hash      string
 	PrevHash  string
+	Nonce 	  int
 }
 
 // ProofOfWork represents a proof-of-work
@@ -52,8 +54,9 @@ type ProofOfWork struct {
 }
 
 type chatMessage struct {
-	contents string
+	Request []byte
 }
+
 
 // Message takes incoming JSON payload for writing heart rate
 type Message struct {
@@ -68,82 +71,17 @@ type Message struct {
 var (
 	Blockchain []Block
 	mutex = &sync.Mutex{}
-	Nonce int
 	maxNonce = math.MaxInt64
 	tmpls = template.Must(template.ParseFiles("web/index.html"))
 	hostFlag    = pflag.IPP("host", "h", nil, "binding host")
 	portFlag    = pflag.Uint16P("port", "p", 0, "binding port")
 	addressFlag = pflag.StringP("address", "a", "", "publicly reachable network address")
-)
-const targetBits = 12 // difficulty setting
+	httpPortFlag = pflag.IntP("webport", "w", loadenv(), "web server port")
 
-
-/*************
- * Functions *
- *************/
-
-func main() {
-	// Load .env file
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Check if http port from .env file is used
-	port := os.Getenv("PORT")
-	ln, err := net.Listen("tcp", ":" + port)
-
-	// Jump to End if http port is used (webserver is probably running)
-	if err != nil {
-		fmt.Printf("Webserver running on port %q\n", port)
-		goto End
-	}
-
-	// Close tcp test connection
-	err = ln.Close()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Couldn't stop listening on port %q: %s\n", port, err)
-		os.Exit(1)
-	}
-
-	go StartBlockchain()
-
-	go func() {
-		log.Fatal(run())
-	}()
-
-End:
-	startChat()
-}
-
-
-/*****************
- * P2P Functions *
- *****************/
-
-func startChat() {
-	// Parse flags/options.
-	pflag.Parse()
-
-	// Create a new configured node.
-	node, err := noise.NewNode(
-		noise.WithNodeBindHost(*hostFlag),
-		noise.WithNodeBindPort(*portFlag),
-		noise.WithNodeAddress(*addressFlag),
-	)
-	check(err)
-
-	// Release resources associated to node at the end of the program.
-	defer node.Close()
-
-	// Register the chatMessage Go type to the node with an associated unmarshal function.
-	node.RegisterMessage(chatMessage{}, unmarshalChatMessage)
-
-	// Register a message handler to the node.
-	node.Handle(handle)
+	node, err = configureNode() // Create a new configured node.
 
 	// Instantiate Kademlia.
-	events := kademlia.Events{
+	events = kademlia.Events{
 		OnPeerAdmitted: func(id noise.ID) {
 			fmt.Printf("Learned about a new peer %s(%s).\n", id.Address, id.ID.String()[:printedLength])
 		},
@@ -152,7 +90,58 @@ func startChat() {
 		},
 	}
 
-	overlay := kademlia.New(kademlia.WithProtocolEvents(events))
+	overlay = kademlia.New(kademlia.WithProtocolEvents(events))
+)
+
+const (
+	targetBits = 12 // difficulty setting
+	printedLength = 8 // printedLength is the total prefix length of a public key associated to a chat users ID.
+	commandLength = 12
+	layout = "2006-01-02 15:04:05"
+)
+
+
+/*************
+ * Functions *
+ *************/
+
+func main() {
+	check(err)
+
+	go StartBlockchain()
+
+	go startChat()
+
+	func() {
+		log.Fatal(run())
+	}()
+}
+
+
+/*****************
+ * P2P Functions *
+ *****************/
+func configureNode() (*noise.Node, error) {
+	// Parse flags/options.
+	pflag.Parse()
+
+	return noise.NewNode(
+		noise.WithNodeBindHost(*hostFlag),
+		noise.WithNodeBindPort(*portFlag),
+		noise.WithNodeAddress(*addressFlag),
+	)
+}
+
+
+func startChat() {
+	// Release resources associated to node at the end of the program.
+	defer node.Close()
+
+	// Register the chatMessage Go type to the node with an associated unmarshal function.
+	node.RegisterMessage(chatMessage{}, unmarshalChatMessage)
+
+	// Register a message handler to the node.
+	node.Handle(handle)
 
 	// Bind Kademlia to the node.
 	node.Bind(overlay.Protocol())
@@ -187,11 +176,11 @@ func startChat() {
 }
 
 func (m chatMessage) Marshal() []byte {
-	return []byte(m.contents)
+	return m.Request
 }
 
 func unmarshalChatMessage(buf []byte) (chatMessage, error) {
-	return chatMessage{contents: strings.ToValidUTF8(string(buf), "")}, nil
+	return chatMessage{Request: buf}, nil
 }
 
 // check panics if err is not nil.
@@ -200,9 +189,6 @@ func check(err error) {
 		panic(err)
 	}
 }
-
-// printedLength is the total prefix length of a public key associated to a chat users ID.
-const printedLength = 8
 
 // input handles inputs from stdin.
 func input(callback func(string)) {
@@ -227,8 +213,244 @@ func input(callback func(string)) {
 	}
 }
 
-// handle handles and prints out valid chat messages from peers.
-func handle(ctx noise.HandlerContext) error {
+func SendGetChain(overlay *kademlia.Protocol) {
+	fmt.Println("Sending GetChain to peers.")
+	ids := overlay.Table().Peers()
+
+	if len(ids) > 0 {
+		nodeAddr := node.ID().Address
+
+		payload := GobEncode(nodeAddr)
+		request := append(CmdToBytes("GetChain"), payload...)
+
+		for _, id := range ids {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := node.SendMessage(ctx, id.Address, chatMessage{Request: request})
+			cancel()
+
+			if err != nil {
+				fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+					id.Address,
+					id.ID.String()[:printedLength],
+					err,
+				)
+				continue
+			}	
+		}	
+	} else {
+		fmt.Println("No peers to send to.")
+	}
+}
+
+func SendReceiveChain(ctx noise.HandlerContext) {
+	fmt.Printf("Sending chain to %s\n", ctx.ID().Address)
+	byteChain := GobEncode(Blockchain)
+	newRequest := append(CmdToBytes("ReceiveChain"), byteChain...)
+
+	sendAddr, sendID := ctx.ID().Address, ctx.ID().ID.String()[:printedLength]
+
+	newCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	err = node.SendMessage(newCtx, sendAddr, chatMessage{Request: newRequest})
+	cancel()
+
+	if err != nil {
+		fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+			sendAddr,
+			sendID,
+			err,
+		)
+	}
+}
+
+func SendCheckBlock(newBlock Block, overlay *kademlia.Protocol) {
+	fmt.Println("Sending CheckBlock to peers.")
+	ids := overlay.Table().Peers()
+
+	if len(ids) > 0 {
+		payload := GobEncode(newBlock)
+		request := append(CmdToBytes("CheckBlock"), payload...)
+
+		for _, id := range ids {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := node.SendMessage(ctx, id.Address, chatMessage{Request: request})
+			cancel()
+
+			if err != nil {
+				fmt.Printf("Failed to send message to %s(%s). Skipping... [error: %s]\n",
+					id.Address,
+					id.ID.String()[:printedLength],
+					err,
+				)
+				continue
+			}
+		}
+	} else {
+		fmt.Println("No peers to send to")
+	}
+}
+
+func handleStdin(request []byte, ctx noise.HandlerContext) error {
+	var buff bytes.Buffer
+	var payload string
+
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if len(payload) == 0 {
+			return nil
+	}
+
+	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], payload)
+
+	return nil
+}
+
+func handleGetChain(request []byte, ctx noise.HandlerContext) error {
+	var buff bytes.Buffer
+	var payload string
+
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if len(payload) == 0 {
+			return nil
+	}
+
+	fmt.Printf("GetChain request from %s\n", payload)
+
+	// prepare request to send chain
+	SendReceiveChain(ctx)
+
+	return nil
+}
+
+func handleReceiveChain(request []byte, ctx noise.HandlerContext) error {
+	var buff bytes.Buffer
+	var payload []Block
+
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	fmt.Printf("Received chain from %s(%s)\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength])
+
+	// replace BlockChain if payload chain is longer
+	if len(payload) > len(Blockchain) {
+		fmt.Println("Longer chain detected, replacing current chain")
+
+		Blockchain = payload
+		spew.Dump(Blockchain)
+	} else if len(payload) == len(Blockchain) && len(payload) == 1 {
+		t1, _ := time.Parse(layout, payload[0].Timestamp)
+		t2, _ := time.Parse(layout, Blockchain[0].Timestamp)
+
+		if t1.Before(t2) {
+			fmt.Println("Received genesis block is earlier, replace chain")
+
+			Blockchain = payload
+			spew.Dump(Blockchain)
+		} else {
+			fmt.Println("Discarded new chain")
+		}
+	} else {
+		fmt.Println("Discarded new chain")
+	}
+	return nil
+}
+
+func handleCheckBlock(request []byte, ctx noise.HandlerContext) error {
+	var buff bytes.Buffer
+	var payload Block
+
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	fmt.Printf("Received block from %s(%s)\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength])
+
+	mutex.Lock()
+	pow := NewProofOfWork(&payload)
+
+	if pow.Validate() {
+		fmt.Println("Block is valid")
+
+		Blockchain = append(Blockchain, payload)
+		spew.Dump(Blockchain)
+		
+
+		// // Send POST request to web server
+		// url := fmt.Sprintf("localhost:%d", *httpPortFlag)
+		// req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("reload")))
+		// req.Header.Set("Content-Type", "application/json")
+
+		// client := &http.Client{}
+		// resp, err := client.Do(req)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// defer resp.Body.Close()
+
+	} else {
+		fmt.Println("Block not valid")
+	}
+	mutex.Unlock()
+
+	// relay current blockchain back to the PC that generated the block
+	SendReceiveChain(ctx)
+
+	return nil
+
+}
+
+func CmdToBytes(cmd string) []byte {
+	var bytes [commandLength]byte
+
+	for i, c := range cmd {
+		bytes[i] = byte(c)
+	}
+
+	return bytes[:]
+}
+
+func BytesToCmd(bytes []byte) string {
+	var cmd []byte
+
+	for _, b := range bytes {
+		if b != 0x0 {
+			cmd = append(cmd, b)
+		}
+	}
+
+	return fmt.Sprintf("%s", cmd)
+}
+
+func GobEncode(data interface{}) []byte {
+	var buff bytes.Buffer
+
+	enc := gob.NewEncoder(&buff)
+	err := enc.Encode(data)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return buff.Bytes()
+}
+
+func handle (ctx noise.HandlerContext) error {
 	if ctx.IsRequest() {
 		return nil
 	}
@@ -243,12 +465,24 @@ func handle(ctx noise.HandlerContext) error {
 		return nil
 	}
 
-	if len(msg.contents) == 0 {
-		return nil
-	}
+	req := msg.Request
 
-	fmt.Printf("%s(%s)> %s\n", ctx.ID().Address, ctx.ID().ID.String()[:printedLength], msg.contents)
+	command := BytesToCmd(req[:commandLength])
+	fmt.Printf("Received %s command\n", command)
 
+	switch command {
+	case "Stdin":
+		return handleStdin(req, ctx)
+	
+	case "GetChain":
+		return handleGetChain(req, ctx)
+
+	case "ReceiveChain":
+		return handleReceiveChain(req, ctx)
+
+	case "CheckBlock":
+		return handleCheckBlock(req, ctx)
+	} 
 	return nil
 }
 
@@ -320,9 +554,13 @@ func chat(node *noise.Node, overlay *kademlia.Protocol, line string) {
 		return
 	}
 
+
+	payload := GobEncode(line)
+	request := append(CmdToBytes("Stdin"), payload...)
+
 	for _, id := range overlay.Table().Peers() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := node.SendMessage(ctx, id.Address, chatMessage{contents: line})
+		err := node.SendMessage(ctx, id.Address, chatMessage{Request: request})
 		cancel()
 
 		if err != nil {
@@ -349,7 +587,7 @@ func NewBlock(oldBlock Block, Data string) Block {
 	t := time.Now()
 
 	block.Index = oldBlock.Index + 1
-	block.Timestamp = strings.Split(strings.Split(t.String(), "+")[0], ".")[0]
+	block.Timestamp = t.Format(layout)
 	block.Data = Data
 	block.PrevHash = oldBlock.Hash
 
@@ -357,7 +595,7 @@ func NewBlock(oldBlock Block, Data string) Block {
 	nonce, hash := pow.RunPOW()
 
 	block.Hash = hex.EncodeToString(hash[:])
-	Nonce = nonce
+	block.Nonce = nonce
 
 	return block
 }
@@ -367,13 +605,13 @@ func NewBlock(oldBlock Block, Data string) Block {
 func StartBlockchain() {
 	t := time.Now()
 	genesisBlock := Block{}
-	genesisBlock = Block{0, strings.Split(strings.Split(t.String(), "+")[0], ".")[0], "Genesis Block", "", ""}
+	genesisBlock = Block{0, t.Format(layout), "Genesis Block", "", "", 0}
 
 	pow := NewProofOfWork(&genesisBlock)
 	nonce, hash := pow.RunPOW()
 
 	genesisBlock.Hash = hex.EncodeToString(hash[:])
-	Nonce = nonce
+	genesisBlock.Nonce = nonce
 
 	spew.Dump(genesisBlock)
 
@@ -381,6 +619,8 @@ func StartBlockchain() {
 	Blockchain = append(Blockchain, genesisBlock)
 	mutex.Unlock()
 
+	// Send GetChain request to peers
+	SendGetChain(overlay)
 }
 
 
@@ -439,17 +679,32 @@ func (pow *ProofOfWork) RunPOW() (int, []byte) {
 }
 
 
-/* Validate validates block's Proof of Work */
+/* Validate validates block's Proof of Work 
+ * 
+ * Checks index, hash, prev hash.
+ */
 func (pow *ProofOfWork) Validate() bool {
 	var hashInt big.Int
 
-	data := pow.prepareData(Nonce)
+	data := pow.prepareData(pow.block.Nonce)
 	hash := sha256.Sum256(data)
 	hashInt.SetBytes(hash[:])
 
-	isValid := hashInt.Cmp(pow.target) == -1
+	prevBlock := Blockchain[len(Blockchain) - 1]
 
-	return isValid
+	if pow.block.Index != (prevBlock.Index + 1) {
+		return false
+	}
+
+	if pow.block.PrevHash != prevBlock.Hash {
+		return false
+	}
+
+	if hashInt.Cmp(pow.target) != -1 {
+		return false
+	}
+
+	return true
 }
 
 
@@ -468,14 +723,25 @@ func IntToHex(num int64) []byte {
 /************************
  * Web Server Functions *
  ************************/
+func loadenv() int {
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Check if http port from .env file is used
+	port, err := strconv.Atoi(os.Getenv("PORT"))
+
+	return port
+}
 
  /* run will set up a http server */
 func run() error {
 	mux := makeMuxRouter()
-	httpPort := os.Getenv("PORT")
-	log.Println("HTTP Server Listening on port :", httpPort)
+	log.Println(fmt.Sprintf("HTTP Server Listening on port :%d", *httpPortFlag))
 	s := &http.Server{
-		Addr:           ":" + httpPort,
+		Addr:           fmt.Sprintf(":%d", *httpPortFlag),
 		Handler:        mux,
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
@@ -542,24 +808,16 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	mutex.Lock()
 	prevBlock := Blockchain[len(Blockchain)-1]
 	if msg.Data == "" {
 		respondWithJSON(w, r, http.StatusBadRequest, r.Body)
 		return
 	}
+
 	newBlock := NewBlock(prevBlock, msg.Data)
 
-	pow := NewProofOfWork(&newBlock)
-
-	if pow.Validate() {
-		Blockchain = append(Blockchain, newBlock)
-		spew.Dump(Blockchain)
-	}
-	mutex.Unlock()
-
-	respondWithJSON(w, r, http.StatusCreated, newBlock)
-
+	// Broadcast new block to peers
+	SendCheckBlock(newBlock, overlay)
 }
 
 
