@@ -87,11 +87,27 @@
 			// Get index and timestamp and data
 			let index = block['Index'];
 			let timestamp = block['Timestamp'];
-			let cont = block['BPM'];
+			let cont = block['Data'];
 
 			// Put object in array
 			blocks.push(new Block(index, timestamp, cont, hash, prevHash));
 		  }
+		}
+
+		// Appends JSON data from XMLHttpRequest
+		function appendData(blockResponse) {
+			let responseData = JSON.parse(blockResponse);
+			// Get hash, previousHash from block
+			let hash = responseData['Hash'];
+			let prevHash = responseData['PrevHash'];
+
+			// Get index and timestamp and data
+			let index = responseData['Index'];
+			let timestamp = responseData['Timestamp'];
+			let cont = responseData['Data'];
+
+			// Put object in array
+			blocks.push(new Block(index, timestamp, cont, hash, prevHash));
 		}
 
 		// Sanitize input value
@@ -102,7 +118,7 @@
 		// Create a new block each time the button is clicked.
 		function click() {
 			var http = new XMLHttpRequest();
-			var url = 'http://localhost:8000/';
+			var url = 'http://localhost:'+{{ .Port }}+'/';
 			
 			// Check for none input
 			if (input.value().length == 0) {
@@ -110,20 +126,18 @@
 				return;
 			}
 			
-			var params = '{"BPM":"'+input.value().stripSlashes()+'"}';
+			var params = '{"Data":"'+input.value().stripSlashes()+'"}';
 			http.open('POST', url, true);
 
 			//Send the proper header information along with the request
 			http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
 
 			http.onreadystatechange = function() {//Call a function when the state changes.
-				if(http.readyState == 4 && http.status == 200) {
-					alert(http.responseText);
+				if(http.readyState == XMLHttpRequest.DONE) {
+					appendData(http.responseText);
 				}
 			}
 			http.send(params);
-			
-			location.reload();
 		}
 
 		// Circle packing algorithm
