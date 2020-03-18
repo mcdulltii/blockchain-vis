@@ -73,6 +73,7 @@ var (
 	Blockchain []Block
 	mutex = &sync.Mutex{}
 	maxNonce = math.MaxInt64
+	isValid = 1
 	tmpls = template.Must(template.ParseFiles("web/index.html"))
 	hostFlag    = pflag.IPP("host", "h", nil, "binding host")
 	portFlag    = pflag.Uint16P("port", "p", 0, "binding port")
@@ -404,22 +405,11 @@ func handleCheckBlock(request []byte, ctx noise.HandlerContext) error {
 
 		Blockchain = append(Blockchain, payload)
 		spew.Dump(Blockchain)
-		
 
-		// // Send POST request to web server
-		// url := fmt.Sprintf("localhost:%d", *httpPortFlag)
-		// req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("reload")))
-		// req.Header.Set("Content-Type", "application/json")
-
-		// client := &http.Client{}
-		// resp, err := client.Do(req)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		// defer resp.Body.Close()
-
+		isValid = 1
 	} else {
 		fmt.Println("Block not valid")
+		isValid = 0
 	}
 	mutex.Unlock()
 
@@ -775,10 +765,12 @@ func Index(w http.ResponseWriter, r *http.Request) {
 	bytes, _ := json.MarshalIndent(Blockchain, "", "  ")
 	data := struct {
 		Title  string
-		Data string
+		Data  string
+		Port  string
 	}{
 		Title:  "Blockchain Visualisation",
 		Data: strings.ReplaceAll(string(bytes), "\n", ""),
+		Port: strconv.Itoa(*httpPortFlag),
 	}
 
 	if err := tmpls.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -832,6 +824,10 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast new block to peers
 	SendCheckBlock(newBlock, overlay)
+
+	if (isValid == 1) {
+		respondWithJSON(w, r, http.StatusCreated, newBlock)
+	}
 }
 
 
@@ -843,6 +839,7 @@ func respondWithJSON(w http.ResponseWriter, r *http.Request, code int, payload i
 		w.Write([]byte("HTTP 500: Internal Server Error"))
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write(response)
 }
