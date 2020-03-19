@@ -1,0 +1,30 @@
+version: '3.7'
+
+services:
+  run1:
+    build: .
+    expose:
+    - "4444"
+    - "8000"
+    ports:
+    - "4444:4444"
+    - "8000:8000"
+    tty: true
+    networks:
+    - "bc"
+  run2:
+    build: .
+    expose:
+    - "4445"
+    - "8001"
+    ports:
+    - "4445:4445"
+    - "8001:8001"
+    tty: true
+    networks:
+    - "bc"
+
+networks:
+  bc:
+    driver: bridge
+

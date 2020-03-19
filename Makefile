@@ -2,15 +2,15 @@
 
 build:
 	@echo "Building..."
-	docker build -t bc-docker .
+	docker-compose build && docker-compose up -d
 
 run1:
 	@echo "Running terminal one..."
-	docker run -p 4444:4444/tcp -p 8000:8000/tcp -it bc-docker
+	docker exec -it blockchain-vis_run1_1 bash
 
 run2:
 	@echo "Running terminal two..."
-	docker run -p 4445:4445/tcp -p 8001:8001/tcp -it bc-docker
+	docker exec -it blockchain-vis_run2_1 bash
 
 test:
 	go test -v -timeout=5m -race ./...

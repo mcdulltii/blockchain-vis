@@ -41,29 +41,29 @@ import (
 )
 ```
 
-### Usage:
+## Usage:
 <i>Note: Though the program is scalable, to showcase the functions of the program, currently 2 hosts are used for p2p.</i>
 
 ---
 1. <strong>Docker</strong>
 ```shell
-make    # To build docker image
+make    # To build docker containers
 ```
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Using two terminals, exec "make run*" to access bash on built docker images
 - Terminal 1
 ```shell
 admin$ make run1
 # Access bash on bc-docker image with exposed ports 4444 and 8000
-bc-docker$ ./bcVis -p 4444
+run1$ ./bcVis -p 4444
 ```
 - Terminal 2
 ```shell
 admin$ make run2
 # Access bash on bc-docker image with exposed ports 4445 and 8001
-bc-docker$ ./bcVis -p 4445 -w 8001 (ip_of_terminal_1):4444
+run2$ ./bcVis -p 4445 -w 8001 run1:4444
 ```
 ---
-2. <strong>Manual</strong>
+2. <strong>Build binary manually</strong>
 ```shell
 cd bcVis
 go build
