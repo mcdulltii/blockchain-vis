@@ -796,8 +796,8 @@ func Index(w http.ResponseWriter, r *http.Request) {
 		Port  string
 	}{
 		Title:  "Blockchain Visualisation",
-		Data: strings.ReplaceAll(string(bytes), "\n", ""),
-		Port: strconv.Itoa(*httpPortFlag),
+		Data:  strings.ReplaceAll(string(bytes), "\n", ""),
+		Port:  strconv.Itoa(*httpPortFlag),
 	}
 
 	if err := tmpls.ExecuteTemplate(w, "index.html", data); err != nil {
