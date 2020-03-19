@@ -97,7 +97,7 @@ var (
 )
 
 const (
-	targetBits = 12 // difficulty setting
+	targetBits = 15 // difficulty setting
 	printedLength = 8 // printedLength is the total prefix length of a public key associated to a chat users ID.
 	commandLength = 12
 	layout = "2006-01-02 15:04:05"
