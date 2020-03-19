@@ -12,3 +12,5 @@ run2:
 	@echo "Running terminal two..."
 	docker run -p 4445:4445/tcp -p 8001:8001/tcp -it bc-docker
 
+test:
+	go test -v -timeout=5m -race ./...
