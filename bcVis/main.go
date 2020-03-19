@@ -53,6 +53,7 @@ type ProofOfWork struct {
 	target *big.Int
 }
 
+// chatMessage is the struct that is sent to peers
 type chatMessage struct {
 	Request []byte
 }
@@ -72,7 +73,8 @@ var (
 	Blockchain []Block
 	mutex = &sync.Mutex{}
 	maxNonce = math.MaxInt64
-	isValid = 1
+	ValidChan = make(chan bool)
+	jsonflag = false
 	tmpls = template.Must(template.ParseFiles("web/index.html"))
 	hostFlag    = pflag.IPP("host", "h", nil, "binding host")
 	portFlag    = pflag.Uint16P("port", "p", 0, "binding port")
@@ -95,7 +97,7 @@ var (
 )
 
 const (
-	targetBits = 12 // difficulty setting
+	targetBits = 15 // difficulty setting
 	printedLength = 8 // printedLength is the total prefix length of a public key associated to a chat users ID.
 	commandLength = 12
 	layout = "2006-01-02 15:04:05"
@@ -122,6 +124,7 @@ func main() {
 /*****************
  * P2P Functions *
  *****************/
+ /* configureNode sets up the node's IP, Port and connecting peer */
 func configureNode() (*noise.Node, error) {
 	// Parse flags/options.
 	pflag.Parse()
@@ -133,7 +136,11 @@ func configureNode() (*noise.Node, error) {
 	)
 }
 
-
+/* startChat is the main running function enabling peer to peer (p2p) functionalities.
+ * 
+ * incoming communications are done by handle
+ * outgoing communications are done by the respective send functions (sendGetChain, sendReceiveChain, sendCheckBlock and chat)
+ */
 func startChat() {
 	// Release resources associated to node at the end of the program.
 	defer node.Close()
@@ -176,22 +183,26 @@ func startChat() {
 	println()
 }
 
+/* Marshal used to convert data within chatMessage to a byte array */
 func (m chatMessage) Marshal() []byte {
 	return m.Request
 }
 
+/* unmarshalChatMessage returns a chatMessage struct with Request byte array */
 func unmarshalChatMessage(buf []byte) (chatMessage, error) {
 	return chatMessage{Request: buf}, nil
 }
 
-// check panics if err is not nil.
+/* check panics if err is not nil. */
 func check(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
 
-// input handles inputs from stdin.
+/* input handles inputs from stdin. 
+ * this function works alongside chat
+ */
 func input(callback func(string)) {
 	r := bufio.NewReader(os.Stdin)
 
@@ -214,6 +225,7 @@ func input(callback func(string)) {
 	}
 }
 
+/* sendGetChain generates a request for peers' blockchain. */
 func SendGetChain(overlay *kademlia.Protocol) {
 	fmt.Println("Sending GetChain to peers.")
 	ids := overlay.Table().Peers()
@@ -243,6 +255,10 @@ func SendGetChain(overlay *kademlia.Protocol) {
 	}
 }
 
+/* sendReceiveChain generates a response to send its blockchain to a peer. 
+ * 
+ * this function will be called by handleGetChain and handleCheckBlock
+ */
 func SendReceiveChain(ctx noise.HandlerContext) {
 	fmt.Printf("Sending chain to %s\n", ctx.ID().Address)
 	byteChain := GobEncode(Blockchain)
@@ -263,6 +279,7 @@ func SendReceiveChain(ctx noise.HandlerContext) {
 	}
 }
 
+/* sendCheckBlock generates a request to send a block for validation to all peers. */
 func SendCheckBlock(newBlock Block, overlay *kademlia.Protocol) {
 	fmt.Println("Sending CheckBlock to peers.")
 	ids := overlay.Table().Peers()
@@ -290,6 +307,7 @@ func SendCheckBlock(newBlock Block, overlay *kademlia.Protocol) {
 	}
 }
 
+/* handleStdin handles the request sent from terminal line */
 func handleStdin(request []byte, ctx noise.HandlerContext) error {
 	var buff bytes.Buffer
 	var payload string
@@ -310,6 +328,7 @@ func handleStdin(request []byte, ctx noise.HandlerContext) error {
 	return nil
 }
 
+/* handleGetChain handles the GetChain request. It will send a ReceiveChain request to the sender */
 func handleGetChain(request []byte, ctx noise.HandlerContext) error {
 	var buff bytes.Buffer
 	var payload string
@@ -333,6 +352,9 @@ func handleGetChain(request []byte, ctx noise.HandlerContext) error {
 	return nil
 }
 
+/* handleReceiveChain handles ReceiveChain requests. It will append chains which are longer or have an earlier genesis block.
+ * It will also send a boolean data to ValidChan to update the web server.
+ */
 func handleReceiveChain(request []byte, ctx noise.HandlerContext) error {
 	var buff bytes.Buffer
 	var payload []Block
@@ -352,6 +374,11 @@ func handleReceiveChain(request []byte, ctx noise.HandlerContext) error {
 
 		Blockchain = payload
 		spew.Dump(Blockchain)
+
+		if jsonflag {
+			ValidChan <- true
+		}
+
 	} else if len(payload) == len(Blockchain) && len(payload) == 1 {
 		t1, _ := time.Parse(layout, payload[0].Timestamp)
 		t2, _ := time.Parse(layout, Blockchain[0].Timestamp)
@@ -361,15 +388,25 @@ func handleReceiveChain(request []byte, ctx noise.HandlerContext) error {
 
 			Blockchain = payload
 			spew.Dump(Blockchain)
+
 		} else {
 			fmt.Println("Discarded new chain")
 		}
+
 	} else {
 		fmt.Println("Discarded new chain")
+
+		if jsonflag {
+			ValidChan <- false
+		}
 	}
+
 	return nil
 }
 
+/* handleCheckBlock handles CheckBlock requests. It receives a block from a peer and validates it 
+ * and sends its own chain to the peer afterwards.
+ */
 func handleCheckBlock(request []byte, ctx noise.HandlerContext) error {
 	var buff bytes.Buffer
 	var payload Block
@@ -392,10 +429,8 @@ func handleCheckBlock(request []byte, ctx noise.HandlerContext) error {
 		Blockchain = append(Blockchain, payload)
 		spew.Dump(Blockchain)
 
-		isValid = 1
 	} else {
 		fmt.Println("Block not valid")
-		isValid = 0
 	}
 	mutex.Unlock()
 
@@ -406,6 +441,7 @@ func handleCheckBlock(request []byte, ctx noise.HandlerContext) error {
 
 }
 
+/* CmdToBytes converts a command string into a byte array of commandLength */
 func CmdToBytes(cmd string) []byte {
 	var bytes [commandLength]byte
 
@@ -416,6 +452,7 @@ func CmdToBytes(cmd string) []byte {
 	return bytes[:]
 }
 
+/* BytesToCmd converts a byte array into a command string */
 func BytesToCmd(bytes []byte) string {
 	var cmd []byte
 
@@ -428,6 +465,7 @@ func BytesToCmd(bytes []byte) string {
 	return fmt.Sprintf("%s", cmd)
 }
 
+/* GodEncode converts data into a byte array */
 func GobEncode(data interface{}) []byte {
 	var buff bytes.Buffer
 
@@ -440,6 +478,9 @@ func GobEncode(data interface{}) []byte {
 	return buff.Bytes()
 }
 
+/* handle is the main handler for the peer to peer functionalities. It will decode the commmand header
+ * and call the respective command handler 
+ */
 func handle (ctx noise.HandlerContext) error {
 	if ctx.IsRequest() {
 		return nil
@@ -476,7 +517,7 @@ func handle (ctx noise.HandlerContext) error {
 	return nil
 }
 
-// help prints out the users ID and commands available.
+/* help prints out the users ID and commands available. */
 func help(node *noise.Node) {
 	fmt.Printf("Your ID is %s(%s). Type '/discover' to attempt to discover new "+
 		"peers, or '/peers' to list out all peers you are connected to.\n",
@@ -485,7 +526,7 @@ func help(node *noise.Node) {
 	)
 }
 
-// bootstrap pings and dials an array of network addresses which we may interact with and  discover peers from.
+/* bootstrap pings and dials an array of network addresses which we may interact with and  discover peers from. */
 func bootstrap(node *noise.Node, addresses ...string) {
 	for _, addr := range addresses {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -499,7 +540,7 @@ func bootstrap(node *noise.Node, addresses ...string) {
 	}
 }
 
-// discover uses Kademlia to discover new peers from nodes we already are aware of.
+/* discover uses Kademlia to discover new peers from nodes we already are aware of. */
 func discover(overlay *kademlia.Protocol) {
 	ids := overlay.Discover()
 
@@ -515,7 +556,7 @@ func discover(overlay *kademlia.Protocol) {
 	}
 }
 
-// peers prints out all peers we are already aware of.
+/* peers prints out all peers we are already aware of. */
 func peers(overlay *kademlia.Protocol) {
 	ids := overlay.Table().Peers()
 
@@ -527,7 +568,7 @@ func peers(overlay *kademlia.Protocol) {
 	fmt.Printf("You know %d peer(s): [%v]\n", len(ids), strings.Join(str, ", "))
 }
 
-// chat handles sending chat messages and handling chat commands.
+/* chat handles sending chat messages and handling chat commands. */
 func chat(node *noise.Node, overlay *kademlia.Protocol, line string) {
 	switch line {
 	case "/discover":
@@ -792,6 +833,7 @@ func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var msg Message
+	var isValid bool
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&msg); err != nil {
@@ -808,12 +850,46 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 
 	newBlock := NewBlock(prevBlock, msg.Data)
 
-	// Broadcast new block to peers
-	SendCheckBlock(newBlock, overlay)
+	// check if there are connected peers
+	if len(overlay.Table().Peers()) > 0 {
+		// Broadcast new block to peers
+		go SendCheckBlock(newBlock, overlay)
 
-	if (isValid == 1) {
+		// set true to allow handleReceiveChain to send boolean to ValidChan
+		jsonflag = true
+
+		isValid = <- ValidChan
+
+	} else {
+		fmt.Println("no peers to send to, self-validating block.")
+
+		mutex.Lock()
+		pow := NewProofOfWork(&newBlock)
+
+		if pow.Validate() {
+			fmt.Println("Block is valid")
+
+			Blockchain = append(Blockchain, newBlock)
+			spew.Dump(Blockchain)
+
+			isValid = true
+		} else {
+			fmt.Println("Block not valid")
+
+			isValid = false
+		}
+		mutex.Unlock()
+
+
+	}
+
+	
+	if isValid {
 		respondWithJSON(w, r, http.StatusCreated, newBlock)
 	}
+
+	// set to false to prevent data sent to channel
+	jsonflag = false
 }
 
 
