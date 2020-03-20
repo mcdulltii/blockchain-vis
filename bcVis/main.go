@@ -810,24 +810,11 @@ func Index(w http.ResponseWriter, r *http.Request) {
 /* makeMuxRouter creates and return a router handler*/
 func makeMuxRouter() http.Handler {
 	muxRouter := mux.NewRouter()
-	// muxRouter.HandleFunc("/", handleGetBlockchain).Methods("GET")
 	muxRouter.HandleFunc("/", handleWriteBlock).Methods("POST")
 	muxRouter.HandleFunc("/web/", Index)
 	muxRouter.PathPrefix("/web/").Handler(http.StripPrefix("/web/", http.FileServer(http.Dir("web/"))))
 	return muxRouter
 }
-
-
-/* handleGetBlockchain writes a blockchain when we receive an http request */
-func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
-	bytes, err := json.MarshalIndent(Blockchain, "", "  ")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	io.WriteString(w, string(bytes))
-}
-
 
 /* handleWriteBlock takes the JSON payload as data input and inserts a new block */
 func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
