@@ -81,7 +81,7 @@ var (
 	addressFlag = pflag.StringP("address", "a", "", "publicly reachable network address")
 	httpPortFlag = pflag.IntP("webport", "w", loadenv(), "web server port")
 
-	node, err = configureNode() // Create a new configured node.
+	node noise.Node
 
 	// Instantiate Kademlia.
 	events = kademlia.Events{
@@ -109,7 +109,7 @@ const (
  *************/
 
 func main() {
-	check(err)
+	pflag.Parse()
 
 	go StartBlockchain()
 
@@ -124,17 +124,6 @@ func main() {
 /*****************
  * P2P Functions *
  *****************/
- /* configureNode sets up the node's IP, Port and connecting peer */
-func configureNode() (*noise.Node, error) {
-	// Parse flags/options.
-	pflag.Parse()
-
-	return noise.NewNode(
-		noise.WithNodeBindHost(*hostFlag),
-		noise.WithNodeBindPort(*portFlag),
-		noise.WithNodeAddress(*addressFlag),
-	)
-}
 
 /* startChat is the main running function enabling peer to peer (p2p) functionalities.
  * 
@@ -142,6 +131,14 @@ func configureNode() (*noise.Node, error) {
  * outgoing communications are done by the respective send functions (sendGetChain, sendReceiveChain, sendCheckBlock and chat)
  */
 func startChat() {
+	// configure new node
+	node, err := noise.NewNode(
+		noise.WithNodeBindHost(*hostFlag),
+		noise.WithNodeBindPort(*portFlag),
+		noise.WithNodeAddress(*addressFlag),
+	)
+	check(err)
+
 	// Release resources associated to node at the end of the program.
 	defer node.Close()
 
@@ -267,7 +264,7 @@ func SendReceiveChain(ctx noise.HandlerContext) {
 	sendAddr, sendID := ctx.ID().Address, ctx.ID().ID.String()[:printedLength]
 
 	newCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	err = node.SendMessage(newCtx, sendAddr, chatMessage{Request: newRequest})
+	err := node.SendMessage(newCtx, sendAddr, chatMessage{Request: newRequest})
 	cancel()
 
 	if err != nil {
@@ -810,24 +807,11 @@ func Index(w http.ResponseWriter, r *http.Request) {
 /* makeMuxRouter creates and return a router handler*/
 func makeMuxRouter() http.Handler {
 	muxRouter := mux.NewRouter()
-	// muxRouter.HandleFunc("/", handleGetBlockchain).Methods("GET")
 	muxRouter.HandleFunc("/", handleWriteBlock).Methods("POST")
 	muxRouter.HandleFunc("/web/", Index)
 	muxRouter.PathPrefix("/web/").Handler(http.StripPrefix("/web/", http.FileServer(http.Dir("web/"))))
 	return muxRouter
 }
-
-
-/* handleGetBlockchain writes a blockchain when we receive an http request */
-func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
-	bytes, err := json.MarshalIndent(Blockchain, "", "  ")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	io.WriteString(w, string(bytes))
-}
-
 
 /* handleWriteBlock takes the JSON payload as data input and inserts a new block */
 func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
