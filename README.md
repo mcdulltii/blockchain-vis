@@ -11,38 +11,37 @@ P5JS Visualization for Golang Blockchain
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"encoding/binary"
 	"encoding/gob"
-	"io"
-	"log"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"html/template"
-	"net/http"
-	"os"
-	"os/signal"
+	"io"
+	"io/ioutil"
+	"log"
 	"math"
 	"math/big"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"bufio"
-	"context"
-	"errors"
-	"fmt"
-	"strconv"
 
-	"github.com/perlin-network/noise"
-	"github.com/perlin-network/noise/kademlia"
-	"github.com/spf13/pflag"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
+	"github.com/spf13/pflag"
 )
 ```
 
 ## Usage:
-<i>Note: Though the program is scalable, to showcase the functions of the program, currently 2 hosts are used for p2p.</i>
+<i>Note: Though the program is scalable, to showcase the functions of the program, currently 2 docker peers are created for p2p.</i>
+
+- -h, --host string   binding host (default (Outbound Host IP))
+- -p, --port int      binding port (default 4444)
+- -w, --webport int   web server port (default 8000)
 
 ---
 1. <strong>Docker</strong>
@@ -53,33 +52,26 @@ make    # To build docker containers
 - Terminal 1
 ```shell
 admin$ make run1
-# Access bash on bc-docker image with exposed ports 4444 and 8000
-run1$ ./bcVis -p 4444
+# Access bash on blockchain-vis_run1_1 with exposed ports 4444 and 8000
+run1$ ./blockchain-vis
 ```
 - Terminal 2
 ```shell
 admin$ make run2
-# Access bash on bc-docker image with exposed ports 4445 and 8001
-run2$ ./bcVis -p 4445 -w 8001 run1:4444
+# Access bash on blockchain-vis_run2_1 with exposed ports 4444 and 8000
+run2$ ./blockchain-vis (ip of run1):4444
 ```
 ---
-2. <strong>Build binary manually</strong>
+2. <strong>Build local binary</strong>
 ```shell
-cd bcVis
-go build
-```
-- Terminal 1
-```shell
-./bcVis -p 4444
-```
-- Terminal 2
-```shell
-./bcVis -p 4445 -w 8001 (ip_of_terminal_1):4444
+make local
 ```
 ---
 
 ## P5JS Web Visualizations
-Default .env port: <b>8000</b>
+<i>Note: Limited to work only on localhost</i>
+
+Default port: <b>8000</b>
 
 Access web server through http://localhost:(port)/web/
 
