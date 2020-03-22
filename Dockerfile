@@ -2,11 +2,12 @@ FROM golang
 
 ADD . /go/src/blockchain-vis
 
-RUN cd src/blockchain-vis/bcVis && \
-	go build && \
-	chmod 700 /go/src/blockchain-vis/bcVis/b*
+WORKDIR /go/src/blockchain-vis
 
-WORKDIR /go/src/blockchain-vis/bcVis
+RUN go get -v -d ./...
+
+RUN go build && \
+	chmod 700 /go/src/blockchain-vis/b*
 
 ENTRYPOINT ["bash"]
 
