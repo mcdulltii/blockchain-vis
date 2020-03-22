@@ -79,6 +79,7 @@ type CheckBlock struct {
 
 var (
 	nodeAddress   string
+	httpPort      int
 	KnownNodes    []string
 	Blockchain    []Block
 	mutex         = &sync.Mutex{}
@@ -651,10 +652,13 @@ func IntToHex(num int64) []byte {
 
 /* run will set up a http server */
 func run() error {
+	pflag.Parse()
+
+	httpPort, _ = strconv.Atoi(fmt.Sprintf("%d", *httpPortFlag))
 	mux := makeMuxRouter()
-	log.Println(fmt.Sprintf("HTTP Server Listening on port :%d", *httpPortFlag))
+	log.Println(fmt.Sprintf("HTTP Server Listening on port :%d", httpPort))
 	s := &http.Server{
-		Addr:           fmt.Sprintf(":%d", *httpPortFlag),
+		Addr:           fmt.Sprintf(":%d", httpPort),
 		Handler:        mux,
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
@@ -678,7 +682,7 @@ func Index(w http.ResponseWriter, r *http.Request) {
 	}{
 		Title: "Blockchain Visualisation",
 		Data:  strings.ReplaceAll(string(bytes), "\n", ""),
-		Port:  strconv.Itoa(*httpPortFlag),
+		Port:  strconv.Itoa(httpPort),
 	}
 
 	if err := tmpls.ExecuteTemplate(w, "index.html", data); err != nil {
