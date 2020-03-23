@@ -468,6 +468,7 @@ func CmdToBytes(cmd string) []byte {
 	return bytes[:]
 }
 
+/* BytesToCmd converts a byte array into a command string. */
 func BytesToCmd(bytes []byte) string {
 	var cmd []byte
 
@@ -493,11 +494,6 @@ func GobEncode(data interface{}) []byte {
 	}
 
 	return buff.Bytes()
-}
-
-/* AddNode checks KnownNodes and adds node into KnownNodes if it is not known. */
-func AddNode(ip string) {
-
 }
 
 /* NodeIsKnown checks the ip if it is in KnownNodes. */
