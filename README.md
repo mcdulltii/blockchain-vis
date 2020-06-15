@@ -1,4 +1,6 @@
 # Blockchain Visualization
+[![](https://img.shields.io/badge/Category-Blockchain-E5A505?style=flat-square)]() [![](https://img.shields.io/badge/Language-JS%20%2f%20Golang-E5A505?style=flat-square)]() [![](https://img.shields.io/badge/Version-1.0-E5A505?style=flat-square&color=green)]()
+
 P5JS Visualization for Golang Blockchain
 
 ## Features
